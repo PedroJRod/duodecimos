@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from django.http import HttpResponse, JsonResponse
 from django.views.generic import TemplateView
-from .models import RevenueSource, MonthlyRevenue, PowerEntity, MonthlyAllowance, MONTH_CHOICES
+from .models import RevenueSource, MonthlyRevenue, PowerEntity, MonthlyAllowance, MONTH_CHOICES, ExpenseCategory, MonthlyExpense
 import pandas as pd
 from decimal import Decimal
 from django.db.models import Sum
@@ -30,27 +30,34 @@ class DashboardView(TemplateView):
             'datasets': []
         }
         
+        table_data = []
+        totals_by_power = [0] * len(powers)  # Totais por poder (coluna)
+        
         if period == 'monthly':
             for month in range(1, 13):
                 month_allowances = allowances.filter(month=month)
-                data['labels'].append(dict(MONTH_CHOICES)[month])
+                month_name = dict(MONTH_CHOICES)[month]
+                data['labels'].append(month_name)
                 
-                for power in powers:
+                values = []
+                period_total = 0  # Total do período (linha)
+                for i, power in enumerate(powers):
                     power_allowance = month_allowances.filter(power=power).first()
-                    if power_allowance:
-                        if not any(d['label'] == power.name for d in data['datasets']):
-                            data['datasets'].append({
-                                'label': power.name,
-                                'data': []
-                            })
-                        for dataset in data['datasets']:
-                            if dataset['label'] == power.name:
-                                dataset['data'].append(float(power_allowance.calculated_value))
-                    else:
-                        # Adicionar 0 se não houver valor
-                        for dataset in data['datasets']:
-                            if dataset['label'] == power.name:
-                                dataset['data'].append(0)
+                    value = float(power_allowance.calculated_value) if power_allowance else 0
+                    values.append(value)
+                    totals_by_power[i] += value
+                    period_total += value
+                    
+                    if not any(d['label'] == power.name for d in data['datasets']):
+                        data['datasets'].append({
+                            'label': power.name,
+                            'data': []
+                        })
+                    for dataset in data['datasets']:
+                        if dataset['label'] == power.name:
+                            dataset['data'].append(value)
+                
+                table_data.append((month_name, values, period_total))
         
         elif period == 'bimonthly':
             for i in range(0, 12, 2):
@@ -58,9 +65,14 @@ class DashboardView(TemplateView):
                 label = f"{dict(MONTH_CHOICES)[months[0]]}-{dict(MONTH_CHOICES)[months[1]]}"
                 data['labels'].append(label)
                 
-                for power in powers:
+                values = []
+                period_total = 0  # Total do período (linha)
+                for i, power in enumerate(powers):
                     power_allowances = allowances.filter(month__in=months, power=power)
                     total = sum(float(a.calculated_value) for a in power_allowances)
+                    values.append(total)
+                    totals_by_power[i] += total
+                    period_total += total
                     
                     if not any(d['label'] == power.name for d in data['datasets']):
                         data['datasets'].append({
@@ -70,6 +82,8 @@ class DashboardView(TemplateView):
                     for dataset in data['datasets']:
                         if dataset['label'] == power.name:
                             dataset['data'].append(total)
+                
+                table_data.append((label, values, period_total))
         
         elif period == 'quarterly':
             for i in range(0, 12, 3):
@@ -77,9 +91,14 @@ class DashboardView(TemplateView):
                 label = f"{dict(MONTH_CHOICES)[months[0]]}-{dict(MONTH_CHOICES)[months[-1]]}"
                 data['labels'].append(label)
                 
-                for power in powers:
+                values = []
+                period_total = 0  # Total do período (linha)
+                for i, power in enumerate(powers):
                     power_allowances = allowances.filter(month__in=months, power=power)
                     total = sum(float(a.calculated_value) for a in power_allowances)
+                    values.append(total)
+                    totals_by_power[i] += total
+                    period_total += total
                     
                     if not any(d['label'] == power.name for d in data['datasets']):
                         data['datasets'].append({
@@ -89,6 +108,8 @@ class DashboardView(TemplateView):
                     for dataset in data['datasets']:
                         if dataset['label'] == power.name:
                             dataset['data'].append(total)
+                
+                table_data.append((label, values, period_total))
         
         elif period == 'semiannual':
             for i in range(0, 12, 6):
@@ -96,9 +117,14 @@ class DashboardView(TemplateView):
                 label = f"{dict(MONTH_CHOICES)[months[0]]}-{dict(MONTH_CHOICES)[months[-1]]}"
                 data['labels'].append(label)
                 
-                for power in powers:
+                values = []
+                period_total = 0  # Total do período (linha)
+                for i, power in enumerate(powers):
                     power_allowances = allowances.filter(month__in=months, power=power)
                     total = sum(float(a.calculated_value) for a in power_allowances)
+                    values.append(total)
+                    totals_by_power[i] += total
+                    period_total += total
                     
                     if not any(d['label'] == power.name for d in data['datasets']):
                         data['datasets'].append({
@@ -108,22 +134,38 @@ class DashboardView(TemplateView):
                     for dataset in data['datasets']:
                         if dataset['label'] == power.name:
                             dataset['data'].append(total)
+                
+                table_data.append((label, values, period_total))
         
         elif period == 'annual':
-            data['labels'].append(str(year))
-            for power in powers:
+            label = str(year)
+            data['labels'].append(label)
+            
+            values = []
+            period_total = 0  # Total do período (linha)
+            for i, power in enumerate(powers):
                 power_allowances = allowances.filter(power=power)
                 total = sum(float(a.calculated_value) for a in power_allowances)
-                
+                values.append(total)
+                totals_by_power[i] = total
+                period_total += total
                 data['datasets'].append({
                     'label': power.name,
                     'data': [total]
                 })
+            
+            table_data.append((label, values, period_total))
+        
+        # Calcula o total geral (soma de todos os valores)
+        total_geral = sum(totals_by_power)
         
         context['chart_data'] = json.dumps(data)
         context['powers'] = powers
         context['selected_year'] = year
         context['selected_period'] = period
+        context['table_data'] = table_data
+        context['totals_by_power'] = totals_by_power
+        context['total_geral'] = total_geral
         return context
 
 def upload_excel(request):
@@ -191,17 +233,23 @@ def calculate_allowances(year=None):
                 }
             )
 
-def generate_report(request):
+def generate_report(request, type='revenue'):
     year = int(request.GET.get('year', datetime.now().year))
     period = request.GET.get('period', 'monthly')
     format_type = request.GET.get('format', 'pdf')
     
-    allowances = MonthlyAllowance.objects.filter(year=year)
+    if type == 'revenue':
+        allowances = MonthlyAllowance.objects.filter(year=year)
+        title = 'Previsão dos Duodécimos'
+    else:
+        allowances = MonthlyExpense.objects.filter(year=year)
+        title = 'Cronograma de Desembolso'
+    
     powers = PowerEntity.objects.all()
     
     if format_type == 'pdf':
         response = HttpResponse(content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="duodecimos_{year}_{period}.pdf"'
+        response['Content-Disposition'] = f'attachment; filename="{type}_{year}_{period}.pdf"'
         
         doc = SimpleDocTemplate(response, pagesize=letter)
         elements = []
@@ -212,8 +260,13 @@ def generate_report(request):
             for month_num, month_name in MONTH_CHOICES:
                 row = [month_name]
                 for power in powers:
-                    allowance = allowances.filter(month=month_num, power=power).first()
-                    row.append(f'R$ {allowance.calculated_value:,.2f}' if allowance else 'R$ 0,00')
+                    if type == 'revenue':
+                        allowance = allowances.filter(month=month_num, power=power).first()
+                        value = float(allowance.calculated_value) if allowance else 0
+                    else:
+                        power_expenses = allowances.filter(month=month_num, power=power)
+                        value = sum(float(e.value) for e in power_expenses)
+                    row.append(f'R$ {value:,.2f}')
                 data.append(row)
         
         elif period == 'bimonthly':
@@ -222,8 +275,12 @@ def generate_report(request):
                 label = f"{dict(MONTH_CHOICES)[months[0]]}-{dict(MONTH_CHOICES)[months[1]]}"
                 row = [label]
                 for power in powers:
-                    power_allowances = allowances.filter(month__in=months, power=power)
-                    total = sum(float(a.calculated_value) for a in power_allowances)
+                    if type == 'revenue':
+                        power_allowances = allowances.filter(month__in=months, power=power)
+                        total = sum(float(a.calculated_value) for a in power_allowances)
+                    else:
+                        power_expenses = allowances.filter(month__in=months, power=power)
+                        total = sum(float(e.value) for e in power_expenses)
                     row.append(f'R$ {total:,.2f}')
                 data.append(row)
         
@@ -233,8 +290,12 @@ def generate_report(request):
                 label = f"{dict(MONTH_CHOICES)[months[0]]}-{dict(MONTH_CHOICES)[months[-1]]}"
                 row = [label]
                 for power in powers:
-                    power_allowances = allowances.filter(month__in=months, power=power)
-                    total = sum(float(a.calculated_value) for a in power_allowances)
+                    if type == 'revenue':
+                        power_allowances = allowances.filter(month__in=months, power=power)
+                        total = sum(float(a.calculated_value) for a in power_allowances)
+                    else:
+                        power_expenses = allowances.filter(month__in=months, power=power)
+                        total = sum(float(e.value) for e in power_expenses)
                     row.append(f'R$ {total:,.2f}')
                 data.append(row)
         
@@ -244,16 +305,24 @@ def generate_report(request):
                 label = f"{dict(MONTH_CHOICES)[months[0]]}-{dict(MONTH_CHOICES)[months[-1]]}"
                 row = [label]
                 for power in powers:
-                    power_allowances = allowances.filter(month__in=months, power=power)
-                    total = sum(float(a.calculated_value) for a in power_allowances)
+                    if type == 'revenue':
+                        power_allowances = allowances.filter(month__in=months, power=power)
+                        total = sum(float(a.calculated_value) for a in power_allowances)
+                    else:
+                        power_expenses = allowances.filter(month__in=months, power=power)
+                        total = sum(float(e.value) for e in power_expenses)
                     row.append(f'R$ {total:,.2f}')
                 data.append(row)
         
         elif period == 'annual':
             row = [str(year)]
             for power in powers:
-                power_allowances = allowances.filter(power=power)
-                total = sum(float(a.calculated_value) for a in power_allowances)
+                if type == 'revenue':
+                    power_allowances = allowances.filter(power=power)
+                    total = sum(float(a.calculated_value) for a in power_allowances)
+                else:
+                    power_expenses = allowances.filter(power=power)
+                    total = sum(float(e.value) for e in power_expenses)
                 row.append(f'R$ {total:,.2f}')
             data.append(row)
         
@@ -278,7 +347,7 @@ def generate_report(request):
     
     elif format_type == 'excel':
         response = HttpResponse(content_type='application/vnd.ms-excel')
-        response['Content-Disposition'] = f'attachment; filename="duodecimos_{year}_{period}.xlsx"'
+        response['Content-Disposition'] = f'attachment; filename="{type}_{year}_{period}.xlsx"'
         
         df = pd.DataFrame(columns=['Período'] + [power.name for power in powers])
         
@@ -286,8 +355,12 @@ def generate_report(request):
             for month_num, month_name in MONTH_CHOICES:
                 row = {'Período': month_name}
                 for power in powers:
-                    allowance = allowances.filter(month=month_num, power=power).first()
-                    row[power.name] = float(allowance.calculated_value) if allowance else 0
+                    if type == 'revenue':
+                        allowance = allowances.filter(month=month_num, power=power).first()
+                        row[power.name] = float(allowance.calculated_value) if allowance else 0
+                    else:
+                        power_expenses = allowances.filter(month=month_num, power=power)
+                        row[power.name] = sum(float(e.value) for e in power_expenses)
                 df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
         
         elif period == 'bimonthly':
@@ -296,8 +369,12 @@ def generate_report(request):
                 label = f"{dict(MONTH_CHOICES)[months[0]]}-{dict(MONTH_CHOICES)[months[1]]}"
                 row = {'Período': label}
                 for power in powers:
-                    power_allowances = allowances.filter(month__in=months, power=power)
-                    row[power.name] = sum(float(a.calculated_value) for a in power_allowances)
+                    if type == 'revenue':
+                        power_allowances = allowances.filter(month__in=months, power=power)
+                        row[power.name] = sum(float(a.calculated_value) for a in power_allowances)
+                    else:
+                        power_expenses = allowances.filter(month__in=months, power=power)
+                        row[power.name] = sum(float(e.value) for e in power_expenses)
                 df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
         
         elif period == 'quarterly':
@@ -306,8 +383,12 @@ def generate_report(request):
                 label = f"{dict(MONTH_CHOICES)[months[0]]}-{dict(MONTH_CHOICES)[months[-1]]}"
                 row = {'Período': label}
                 for power in powers:
-                    power_allowances = allowances.filter(month__in=months, power=power)
-                    row[power.name] = sum(float(a.calculated_value) for a in power_allowances)
+                    if type == 'revenue':
+                        power_allowances = allowances.filter(month__in=months, power=power)
+                        row[power.name] = sum(float(a.calculated_value) for a in power_allowances)
+                    else:
+                        power_expenses = allowances.filter(month__in=months, power=power)
+                        row[power.name] = sum(float(e.value) for e in power_expenses)
                 df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
         
         elif period == 'semiannual':
@@ -316,18 +397,224 @@ def generate_report(request):
                 label = f"{dict(MONTH_CHOICES)[months[0]]}-{dict(MONTH_CHOICES)[months[-1]]}"
                 row = {'Período': label}
                 for power in powers:
-                    power_allowances = allowances.filter(month__in=months, power=power)
-                    row[power.name] = sum(float(a.calculated_value) for a in power_allowances)
+                    if type == 'revenue':
+                        power_allowances = allowances.filter(month__in=months, power=power)
+                        row[power.name] = sum(float(a.calculated_value) for a in power_allowances)
+                    else:
+                        power_expenses = allowances.filter(month__in=months, power=power)
+                        row[power.name] = sum(float(e.value) for e in power_expenses)
                 df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
         
         elif period == 'annual':
             row = {'Período': str(year)}
             for power in powers:
-                power_allowances = allowances.filter(power=power)
-                row[power.name] = sum(float(a.calculated_value) for a in power_allowances)
+                if type == 'revenue':
+                    power_allowances = allowances.filter(power=power)
+                    row[power.name] = sum(float(a.calculated_value) for a in power_allowances)
+                else:
+                    power_expenses = allowances.filter(power=power)
+                    row[power.name] = sum(float(e.value) for e in power_expenses)
             df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
         
         df.to_excel(response, index=False)
         return response
     
     return JsonResponse({'status': 'error', 'message': 'Invalid format type'})
+
+def upload_expenses(request):
+    if request.method == 'POST' and request.FILES.get('expense_file'):
+        expense_file = request.FILES['expense_file']
+        fs = FileSystemStorage()
+        filename = fs.save(expense_file.name, expense_file)
+        
+        try:
+            df = pd.read_excel(fs.path(filename))
+            
+            if 'ANO' not in df.columns:
+                return JsonResponse({
+                    'status': 'error',
+                    'message': 'A coluna ANO é obrigatória na planilha.'
+                })
+            
+            for _, row in df.iterrows():
+                category, _ = ExpenseCategory.objects.get_or_create(
+                    code=str(row['COD DESPESA']),
+                    name=row['CATEGORIA']
+                )
+                
+                power = PowerEntity.objects.get(name=row['PODER'])
+                year = int(row['ANO'])
+                
+                for month_num, month_name in MONTH_CHOICES:
+                    month_value = row.get(month_name.upper(), 0)
+                    MonthlyExpense.objects.update_or_create(
+                        category=category,
+                        power=power,
+                        year=year,
+                        month=month_num,
+                        defaults={'value': Decimal(str(month_value))}
+                    )
+            
+            fs.delete(filename)
+            return JsonResponse({'status': 'success'})
+        except Exception as e:
+            return JsonResponse({
+                'status': 'error',
+                'message': f'Erro ao processar o arquivo: {str(e)}'
+            })
+    return JsonResponse({'status': 'error', 'message': 'Nenhum arquivo enviado'})
+
+class ExpenseDashboardView(TemplateView):
+    template_name = 'core/expense_dashboard.html'
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        year = int(self.request.GET.get('year', datetime.now().year))
+        period = self.request.GET.get('period', 'monthly')
+        
+        expenses = MonthlyExpense.objects.filter(year=year)
+        powers = PowerEntity.objects.all()
+        categories = ExpenseCategory.objects.all()
+        
+        data = {
+            'labels': [],
+            'datasets': []
+        }
+        
+        table_data = []
+        totals_by_power = [0] * len(powers)
+        
+        if period == 'monthly':
+            for month in range(1, 13):
+                month_expenses = expenses.filter(month=month)
+                month_name = dict(MONTH_CHOICES)[month]
+                data['labels'].append(month_name)
+                
+                values = []
+                period_total = 0
+                for i, power in enumerate(powers):
+                    power_expenses = month_expenses.filter(power=power)
+                    value = sum(float(e.value) for e in power_expenses)
+                    values.append(value)
+                    totals_by_power[i] += value
+                    period_total += value
+                    
+                    if not any(d['label'] == power.name for d in data['datasets']):
+                        data['datasets'].append({
+                            'label': power.name,
+                            'data': []
+                        })
+                    for dataset in data['datasets']:
+                        if dataset['label'] == power.name:
+                            dataset['data'].append(value)
+                
+                table_data.append((month_name, values, period_total))
+        
+        elif period == 'bimonthly':
+            for i in range(0, 12, 2):
+                months = range(i + 1, i + 3)
+                label = f"{dict(MONTH_CHOICES)[months[0]]}-{dict(MONTH_CHOICES)[months[1]]}"
+                data['labels'].append(label)
+                
+                values = []
+                period_total = 0
+                for i, power in enumerate(powers):
+                    power_expenses = expenses.filter(month__in=months, power=power)
+                    total = sum(float(e.value) for e in power_expenses)
+                    values.append(total)
+                    totals_by_power[i] += total
+                    period_total += total
+                    
+                    if not any(d['label'] == power.name for d in data['datasets']):
+                        data['datasets'].append({
+                            'label': power.name,
+                            'data': []
+                        })
+                    for dataset in data['datasets']:
+                        if dataset['label'] == power.name:
+                            dataset['data'].append(total)
+                
+                table_data.append((label, values, period_total))
+        
+        elif period == 'quarterly':
+            for i in range(0, 12, 3):
+                months = range(i + 1, i + 4)
+                label = f"{dict(MONTH_CHOICES)[months[0]]}-{dict(MONTH_CHOICES)[months[-1]]}"
+                data['labels'].append(label)
+                
+                values = []
+                period_total = 0
+                for i, power in enumerate(powers):
+                    power_expenses = expenses.filter(month__in=months, power=power)
+                    total = sum(float(e.value) for e in power_expenses)
+                    values.append(total)
+                    totals_by_power[i] += total
+                    period_total += total
+                    
+                    if not any(d['label'] == power.name for d in data['datasets']):
+                        data['datasets'].append({
+                            'label': power.name,
+                            'data': []
+                        })
+                    for dataset in data['datasets']:
+                        if dataset['label'] == power.name:
+                            dataset['data'].append(total)
+                
+                table_data.append((label, values, period_total))
+        
+        elif period == 'semiannual':
+            for i in range(0, 12, 6):
+                months = range(i + 1, i + 7)
+                label = f"{dict(MONTH_CHOICES)[months[0]]}-{dict(MONTH_CHOICES)[months[-1]]}"
+                data['labels'].append(label)
+                
+                values = []
+                period_total = 0
+                for i, power in enumerate(powers):
+                    power_expenses = expenses.filter(month__in=months, power=power)
+                    total = sum(float(e.value) for e in power_expenses)
+                    values.append(total)
+                    totals_by_power[i] += total
+                    period_total += total
+                    
+                    if not any(d['label'] == power.name for d in data['datasets']):
+                        data['datasets'].append({
+                            'label': power.name,
+                            'data': []
+                        })
+                    for dataset in data['datasets']:
+                        if dataset['label'] == power.name:
+                            dataset['data'].append(total)
+                
+                table_data.append((label, values, period_total))
+        
+        elif period == 'annual':
+            label = str(year)
+            data['labels'].append(label)
+            
+            values = []
+            period_total = 0
+            for i, power in enumerate(powers):
+                power_expenses = expenses.filter(power=power)
+                total = sum(float(e.value) for e in power_expenses)
+                values.append(total)
+                totals_by_power[i] = total
+                period_total += total
+                data['datasets'].append({
+                    'label': power.name,
+                    'data': [total]
+                })
+            
+            table_data.append((label, values, period_total))
+        
+        # Calcula o total geral
+        total_geral = sum(totals_by_power)
+        
+        context['chart_data'] = json.dumps(data)
+        context['powers'] = powers
+        context['selected_year'] = year
+        context['selected_period'] = period
+        context['table_data'] = table_data
+        context['totals_by_power'] = totals_by_power
+        context['total_geral'] = total_geral
+        return context

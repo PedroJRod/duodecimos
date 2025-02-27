@@ -5,7 +5,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Previsão dos Duodécimos com base no Cronograma da Arrecadação</title>
+    <title>Cronograma de Desembolso dos Repasses</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
@@ -36,7 +36,11 @@
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-4">
         <div class="container">
-            <a class="navbar-brand" href="#">Previsão dos Duodécimos com base no Cronograma da Arrecadação</a>
+            <a class="navbar-brand" href="#">Cronograma de Desembolso dos Repasses</a>
+            <div class="navbar-nav">
+                <a class="nav-link" href="{% url 'dashboard' %}">Previsão dos Duodécimos</a>
+                <a class="nav-link active" href="{% url 'expense_dashboard' %}">Cronograma de Desembolso</a>
+            </div>
         </div>
     </nav>
 
@@ -53,16 +57,17 @@
                             <p class="mb-0">A planilha deve conter as seguintes colunas:</p>
                             <ul class="mb-0">
                                 <li><strong>ANO</strong> - Ano de referência</li>
-                                <li><strong>COD FONTE</strong> - Código da fonte de recurso</li>
-                                <li><strong>FONTE DE RECURSOS</strong> - Nome da fonte</li>
+                                <li><strong>COD DESPESA</strong> - Código da categoria de despesa</li>
+                                <li><strong>CATEGORIA</strong> - Nome da categoria</li>
+                                <li><strong>PODER</strong> - Nome do poder</li>
                                 <li><strong>JANEIRO</strong> até <strong>DEZEMBRO</strong> - Valores mensais</li>
                             </ul>
                         </div>
                         <form id="uploadForm" enctype="multipart/form-data">
                             {% csrf_token %}
                             <div class="mb-3">
-                                <label for="excelFile" class="form-label">Selecione a planilha de receitas</label>
-                                <input type="file" class="form-control" id="excelFile" name="excel_file" accept=".xlsx,.xls">
+                                <label for="expenseFile" class="form-label">Selecione a planilha de despesas</label>
+                                <input type="file" class="form-control" id="expenseFile" name="expense_file" accept=".xlsx,.xls">
                             </div>
                             <button type="submit" class="btn btn-primary btn-custom">
                                 <i class="fas fa-upload me-2"></i>Enviar
@@ -78,7 +83,7 @@
             <div class="col-12">
                 <div class="card">
                     <div class="card-header d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0">Previsão dos Duodécimos com base no Cronograma da Arrecadação</h5>
+                        <h5 class="mb-0">Cronograma de Desembolso dos Repasses</h5>
                         <div>
                             <select id="periodSelect" class="form-select form-select-sm d-inline-block w-auto me-2">
                                 <option value="monthly" {% if selected_period == 'monthly' %}selected{% endif %}>Mensal</option>
@@ -101,7 +106,7 @@
                     </div>
                     <div class="card-body">
                         <div class="chart-container">
-                            <canvas id="duodecimosChart"></canvas>
+                            <canvas id="expensesChart"></canvas>
                         </div>
                         <div class="table-responsive mt-4">
                             <table class="table table-striped table-bordered">
@@ -178,7 +183,7 @@
         }
 
         const chartData = {{ chart_data|safe }};
-        const ctx = document.getElementById('duodecimosChart').getContext('2d');
+        const ctx = document.getElementById('expensesChart').getContext('2d');
         const chart = new Chart(ctx, {
             type: 'bar',
             data: chartData,
@@ -201,7 +206,7 @@
                     },
                     title: {
                         display: true,
-                        text: 'Duodécimos por Poder'
+                        text: 'Cronograma de Desembolso por Poder'
                     }
                 }
             }
@@ -213,7 +218,7 @@
             const errorDiv = document.getElementById('uploadError');
             errorDiv.classList.add('d-none');
             
-            fetch('/upload-excel/', {
+            fetch('/upload-expenses/', {
                 method: 'POST',
                 body: formData,
                 headers: {
@@ -239,20 +244,20 @@
         document.getElementById('yearSelect').addEventListener('change', function() {
             const year = this.value;
             const period = document.getElementById('periodSelect').value;
-            window.location.href = `/?year=${year}&period=${period}`;
+            window.location.href = `/expenses/?year=${year}&period=${period}`;
         });
 
         document.getElementById('periodSelect').addEventListener('change', function() {
             const year = document.getElementById('yearSelect').value;
             const period = this.value;
-            window.location.href = `/?year=${year}&period=${period}`;
+            window.location.href = `/expenses/?year=${year}&period=${period}`;
         });
 
         function generateReport(format) {
             const year = document.getElementById('yearSelect').value;
             const period = document.getElementById('periodSelect').value;
-            window.location.href = `/generate-report/?year=${year}&period=${period}&format=${format}`;
+            window.location.href = `/generate-expense-report/?year=${year}&period=${period}&format=${format}`;
         }
     </script>
 </body>
-</html>
+</html> 
