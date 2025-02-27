@@ -1,0 +1,226 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Duodécimos</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+        }
+        .card {
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        .card-header {
+            background-color: #007bff;
+            color: white;
+            border-radius: 10px 10px 0 0 !important;
+        }
+        .btn-custom {
+            border-radius: 20px;
+            padding: 8px 20px;
+        }
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-4">
+        <div class="container">
+            <a class="navbar-brand" href="#">Sistema de Duodécimos</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Upload de Planilha</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-info" role="alert">
+                            <h6 class="alert-heading">Formato da Planilha:</h6>
+                            <p class="mb-0">A planilha deve conter as seguintes colunas:</p>
+                            <ul class="mb-0">
+                                <li><strong>ANO</strong> - Ano de referência</li>
+                                <li><strong>COD FONTE</strong> - Código da fonte de recurso</li>
+                                <li><strong>FONTE DE RECURSOS</strong> - Nome da fonte</li>
+                                <li><strong>JANEIRO</strong> até <strong>DEZEMBRO</strong> - Valores mensais</li>
+                            </ul>
+                        </div>
+                        <form id="uploadForm" enctype="multipart/form-data">
+                            {% csrf_token %}
+                            <div class="mb-3">
+                                <label for="excelFile" class="form-label">Selecione a planilha de receitas</label>
+                                <input type="file" class="form-control" id="excelFile" name="excel_file" accept=".xlsx,.xls">
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-custom">
+                                <i class="fas fa-upload me-2"></i>Enviar
+                            </button>
+                        </form>
+                        <div id="uploadError" class="alert alert-danger mt-3 d-none" role="alert"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Visualização dos Duodécimos</h5>
+                        <div>
+                            <select id="periodSelect" class="form-select form-select-sm d-inline-block w-auto me-2">
+                                <option value="monthly" {% if selected_period == 'monthly' %}selected{% endif %}>Mensal</option>
+                                <option value="bimonthly" {% if selected_period == 'bimonthly' %}selected{% endif %}>Bimestral</option>
+                                <option value="quarterly" {% if selected_period == 'quarterly' %}selected{% endif %}>Trimestral</option>
+                                <option value="semiannual" {% if selected_period == 'semiannual' %}selected{% endif %}>Semestral</option>
+                                <option value="annual" {% if selected_period == 'annual' %}selected{% endif %}>Anual</option>
+                            </select>
+                            <select id="yearSelect" class="form-select form-select-sm d-inline-block w-auto">
+                                {% now "Y" as current_year %}
+                                {% for year in "x"|rjust:"5" %}
+                                    {% with year_value=forloop.counter|add:current_year|add:-3 %}
+                                    <option value="{{ year_value }}" {% if selected_year == year_value %}selected{% endif %}>
+                                        {{ year_value }}
+                                    </option>
+                                    {% endwith %}
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="chart-container">
+                            <canvas id="duodecimosChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Exportar Relatórios</h5>
+                    </div>
+                    <div class="card-body">
+                        <button class="btn btn-success btn-custom me-2" onclick="generateReport('pdf')">
+                            <i class="fas fa-file-pdf me-2"></i>Exportar PDF
+                        </button>
+                        <button class="btn btn-success btn-custom" onclick="generateReport('excel')">
+                            <i class="fas fa-file-excel me-2"></i>Exportar Excel
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        // Get CSRF token from cookie
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+
+        const chartData = {{ chart_data|safe }};
+        const ctx = document.getElementById('duodecimosChart').getContext('2d');
+        const chart = new Chart(ctx, {
+            type: 'bar',
+            data: chartData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value) {
+                                return 'R$ ' + value.toLocaleString('pt-BR');
+                            }
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        position: 'top',
+                    },
+                    title: {
+                        display: true,
+                        text: 'Duodécimos por Poder'
+                    }
+                }
+            }
+        });
+
+        document.getElementById('uploadForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            const errorDiv = document.getElementById('uploadError');
+            errorDiv.classList.add('d-none');
+            
+            fetch('/upload-excel/', {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken')
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    location.reload();
+                } else {
+                    errorDiv.textContent = data.message || 'Erro ao processar o arquivo.';
+                    errorDiv.classList.remove('d-none');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                errorDiv.textContent = 'Erro ao processar o arquivo.';
+                errorDiv.classList.remove('d-none');
+            });
+        });
+
+        document.getElementById('yearSelect').addEventListener('change', function() {
+            const year = this.value;
+            const period = document.getElementById('periodSelect').value;
+            window.location.href = `/?year=${year}&period=${period}`;
+        });
+
+        document.getElementById('periodSelect').addEventListener('change', function() {
+            const year = document.getElementById('yearSelect').value;
+            const period = this.value;
+            window.location.href = `/?year=${year}&period=${period}`;
+        });
+
+        function generateReport(format) {
+            const year = document.getElementById('yearSelect').value;
+            const period = document.getElementById('periodSelect').value;
+            window.location.href = `/generate-report/?year=${year}&period=${period}&format=${format}`;
+        }
+    </script>
+</body>
+</html>
