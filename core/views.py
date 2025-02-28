@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from django.http import HttpResponse, JsonResponse
 from django.views.generic import TemplateView
-from .models import RevenueSource, MonthlyRevenue, PowerEntity, MonthlyAllowance, MONTH_CHOICES, ExpenseCategory, MonthlyExpense
+from .models import RevenueSource, MonthlyRevenue, PowerEntity, MonthlyAllowance, MONTH_CHOICES, ExpenseCategory, MonthlyExpense, Cronograma
 import pandas as pd
 from decimal import Decimal
 from django.db.models import Sum
@@ -13,6 +13,8 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+from django.db import models
+from django.views.decorators.http import require_http_methods
 
 class DashboardView(TemplateView):
     template_name = 'core/dashboard.html'
@@ -617,4 +619,223 @@ class ExpenseDashboardView(TemplateView):
         context['table_data'] = table_data
         context['totals_by_power'] = totals_by_power
         context['total_geral'] = total_geral
+        return context
+
+def update_cronograma_from_excel(file_path):
+    try:
+        # Lê o arquivo Excel do caminho especificado
+        df = pd.read_excel(file_path)
+        
+        # Verifica se todas as colunas necessárias existem
+        required_columns = ['UG', 'Nome Unidade', 'Ano', 'FONTE DE RECURSO', 'VALOR DESPESA']
+        month_columns = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 
+                        'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro']
+        
+        # Verifica colunas obrigatórias
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            return False, f"Colunas obrigatórias ausentes na planilha: {', '.join(missing_columns)}"
+        
+        # Normaliza os nomes das colunas dos meses (remove acentos)
+        df.columns = [col.lower().replace('marco', 'março') for col in df.columns]
+        
+        # Remove linhas onde UG é nulo
+        df = df.dropna(subset=['ug'])
+        
+        # Converte UG para inteiro, tratando possíveis erros
+        try:
+            df['ug'] = df['ug'].fillna(0).astype(int)
+        except Exception as e:
+            return False, "Erro ao converter UG para número inteiro. Verifique se todos os valores são numéricos."
+        
+        # Garante que todas as colunas de meses existam
+        for month in month_columns:
+            if month not in df.columns:
+                df[month] = 0
+        
+        # Converte valores numéricos, substituindo NaN por 0
+        numeric_columns = ['valor_despesa'] + month_columns + ['total']
+        for col in numeric_columns:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        
+        # Calcula o total se não existir
+        if 'total' not in df.columns:
+            df['total'] = df[month_columns].sum(axis=1)
+        
+        # Garante que a coluna Ano existe e tem valores válidos
+        if 'ano' not in df.columns or df['ano'].isnull().any():
+            df['ano'] = 2025  # Valor padrão se não existir
+        else:
+            df['ano'] = df['ano'].fillna(2025).astype(int)
+        
+        # Limpa os dados existentes
+        Cronograma.objects.all().delete()
+        
+        # Itera sobre as linhas do DataFrame e cria registros
+        for _, row in df.iterrows():
+            try:
+                Cronograma.objects.create(
+                    ug=int(row['ug']),
+                    nome_unidade=str(row['nome unidade']).strip(),
+                    ano=int(row['ano']),
+                    fonte_recurso=str(row.get('fonte de recurso', '')).strip(),
+                    valor_despesa=float(row.get('valor_despesa', 0)),
+                    janeiro=float(row['janeiro']),
+                    fevereiro=float(row['fevereiro']),
+                    marco=float(row['março']),
+                    abril=float(row['abril']),
+                    maio=float(row['maio']),
+                    junho=float(row['junho']),
+                    julho=float(row['julho']),
+                    agosto=float(row['agosto']),
+                    setembro=float(row['setembro']),
+                    outubro=float(row['outubro']),
+                    novembro=float(row['novembro']),
+                    dezembro=float(row['dezembro']),
+                    total=float(row['total'])
+                )
+            except Exception as e:
+                print(f"Erro ao processar linha {_}: {str(e)}")
+                continue
+        
+        return True, "Cronograma atualizado com sucesso!"
+    except Exception as e:
+        return False, f"Erro ao atualizar cronograma: {str(e)}"
+
+@require_http_methods(["POST"])
+def upload_cronograma(request):
+    try:
+        if 'excel_file' not in request.FILES:
+            return JsonResponse({'error': 'Nenhum arquivo foi enviado.'}, status=400)
+        
+        excel_file = request.FILES['excel_file']
+        fs = FileSystemStorage()
+        filename = fs.save('cronograma.xlsx', excel_file)
+        file_path = fs.path(filename)
+        
+        # Atualiza o banco de dados com os dados do arquivo
+        success, message = update_cronograma_from_excel(file_path)
+        
+        # Remove o arquivo temporário
+        fs.delete(filename)
+        
+        if success:
+            return JsonResponse({'message': message})
+        else:
+            return JsonResponse({'error': message}, status=400)
+            
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+class CronogramaView(TemplateView):
+    template_name = 'core/cronograma.html'
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        
+        try:
+            # Obtém os parâmetros da URL
+            selected_year = int(self.request.GET.get('year', None))
+            period = self.request.GET.get('period', 'monthly')
+            
+            # Obtém os anos disponíveis do banco de dados
+            available_years = sorted(Cronograma.objects.values_list('ano', flat=True).distinct())
+            
+            # Se não foi selecionado um ano, usa o primeiro disponível
+            if selected_year is None or selected_year not in available_years:
+                selected_year = available_years[0] if available_years else datetime.now().year
+            
+            # Filtra os dados pelo ano selecionado
+            queryset = Cronograma.objects.filter(ano=selected_year)
+            
+            # Lista de meses
+            all_months = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 
+                         'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
+            month_columns = [m.lower() for m in all_months]
+            
+            # Agrupa os dados por UG e soma os valores
+            data = []
+            for ug in queryset.values('ug', 'nome_unidade').distinct():
+                ug_data = queryset.filter(ug=ug['ug']).aggregate(
+                    janeiro=models.Sum('janeiro'),
+                    fevereiro=models.Sum('fevereiro'),
+                    marco=models.Sum('marco'),
+                    abril=models.Sum('abril'),
+                    maio=models.Sum('maio'),
+                    junho=models.Sum('junho'),
+                    julho=models.Sum('julho'),
+                    agosto=models.Sum('agosto'),
+                    setembro=models.Sum('setembro'),
+                    outubro=models.Sum('outubro'),
+                    novembro=models.Sum('novembro'),
+                    dezembro=models.Sum('dezembro'),
+                    total=models.Sum('total')
+                )
+                
+                # Prepara os valores baseado no período selecionado
+                if period == 'monthly':
+                    months = all_months
+                    values = [
+                        ug_data['janeiro'], ug_data['fevereiro'], ug_data['marco'],
+                        ug_data['abril'], ug_data['maio'], ug_data['junho'],
+                        ug_data['julho'], ug_data['agosto'], ug_data['setembro'],
+                        ug_data['outubro'], ug_data['novembro'], ug_data['dezembro']
+                    ]
+                elif period == 'bimonthly':
+                    months = ['Jan-Fev', 'Mar-Abr', 'Mai-Jun', 'Jul-Ago', 'Set-Out', 'Nov-Dez']
+                    values = [
+                        ug_data['janeiro'] + ug_data['fevereiro'],
+                        ug_data['marco'] + ug_data['abril'],
+                        ug_data['maio'] + ug_data['junho'],
+                        ug_data['julho'] + ug_data['agosto'],
+                        ug_data['setembro'] + ug_data['outubro'],
+                        ug_data['novembro'] + ug_data['dezembro']
+                    ]
+                elif period == 'quarterly':
+                    months = ['Jan-Mar', 'Abr-Jun', 'Jul-Set', 'Out-Dez']
+                    values = [
+                        ug_data['janeiro'] + ug_data['fevereiro'] + ug_data['marco'],
+                        ug_data['abril'] + ug_data['maio'] + ug_data['junho'],
+                        ug_data['julho'] + ug_data['agosto'] + ug_data['setembro'],
+                        ug_data['outubro'] + ug_data['novembro'] + ug_data['dezembro']
+                    ]
+                else:  # annual
+                    months = ['Total Anual']
+                    values = [ug_data['total']]
+                
+                # Formata os valores em Reais
+                formatted_values = [
+                    f'R$ {float(value):,.2f}'.replace(',', '_').replace('.', ',').replace('_', '.')
+                    for value in values
+                ]
+                
+                data.append({
+                    'ug': f"{ug['ug']:04d}",  # Formata UG com zeros à esquerda
+                    'nome': ug['nome_unidade'],
+                    'ano': selected_year,
+                    'valores': formatted_values,
+                    'total': f'R$ {float(ug_data["total"]):,.2f}'.replace(',', '_').replace('.', ',').replace('_', '.')
+                })
+            
+            # Ordena os dados por UG
+            data.sort(key=lambda x: int(x['ug']))
+            
+            context.update({
+                'data': data,
+                'months': months,
+                'year': selected_year,
+                'selected_period': period,
+                'available_periods': [
+                    ('monthly', 'Mensal'),
+                    ('bimonthly', 'Bimestral'),
+                    ('quarterly', 'Quadrimestral'),
+                    ('annual', 'Anual')
+                ],
+                'available_years': available_years
+            })
+            
+        except Exception as e:
+            context['error'] = str(e)
+        
         return context

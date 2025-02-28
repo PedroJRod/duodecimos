@@ -1,0 +1,216 @@
+{% extends 'core/base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <form method="get" class="row g-3">
+                                <div class="col-md-4">
+                                    <label for="year" class="form-label">Ano</label>
+                                    <select name="year" id="year" class="form-select">
+                                        {% for y in available_years %}
+                                        <option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-md-4">
+                                    <label for="period" class="form-label">Período</label>
+                                    <select name="period" id="period" class="form-select">
+                                        {% for value, label in available_periods %}
+                                        <option value="{{ value }}" {% if value == selected_period %}selected{% endif %}>{{ label }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-md-4 d-flex align-items-end">
+                                    <button type="submit" class="btn btn-primary">Filtrar</button>
+                                </div>
+                            </form>
+                        </div>
+                        <div class="col-md-4">
+                            <form id="uploadForm" enctype="multipart/form-data" class="row g-3">
+                                {% csrf_token %}
+                                <div class="col-md-8">
+                                    <label for="excelFile" class="form-label">Arquivo do Cronograma</label>
+                                    <input type="file" class="form-control" id="excelFile" name="excel_file" accept=".xlsx,.xls">
+                                </div>
+                                <div class="col-md-4 d-flex align-items-end">
+                                    <button type="submit" class="btn btn-success">Enviar</button>
+                                </div>
+                            </form>
+                            <div id="uploadMessage" class="alert mt-3 d-none"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <h2 class="mb-4">Cronograma de Desembolso {{ year }}</h2>
+
+    {% if error %}
+    <div class="alert alert-danger">
+        {{ error }}
+    </div>
+    {% else %}
+    <div class="table-responsive mb-4">
+        <table class="table table-bordered table-hover">
+            <thead class="thead-dark">
+                <tr>
+                    <th>UG</th>
+                    <th>Nome da Unidade</th>
+                    {% for month in months %}
+                    <th>{{ month }}</th>
+                    {% endfor %}
+                    <th>Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in data %}
+                <tr>
+                    <td>{{ item.ug }}</td>
+                    <td>{{ item.nome }}</td>
+                    {% for valor in item.valores %}
+                    <td class="text-right">{{ valor }}</td>
+                    {% endfor %}
+                    <td class="text-right font-weight-bold">{{ item.total }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Evolução por Período - Linhas</h5>
+                    <canvas id="lineChart"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Evolução por Período - Barras</h5>
+                    <canvas id="barChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Configuração do formulário de upload
+    const uploadForm = document.getElementById('uploadForm');
+    const uploadMessage = document.getElementById('uploadMessage');
+
+    uploadForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const formData = new FormData(this);
+        
+        fetch('{% url "upload_cronograma" %}', {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            uploadMessage.classList.remove('d-none', 'alert-danger', 'alert-success');
+            if (data.error) {
+                uploadMessage.classList.add('alert-danger');
+                uploadMessage.textContent = data.error;
+            } else {
+                uploadMessage.classList.add('alert-success');
+                uploadMessage.textContent = data.message;
+                // Recarrega a página após 2 segundos
+                setTimeout(() => window.location.reload(), 2000);
+            }
+        })
+        .catch(error => {
+            uploadMessage.classList.remove('d-none', 'alert-danger', 'alert-success');
+            uploadMessage.classList.add('alert-danger');
+            uploadMessage.textContent = 'Erro ao enviar arquivo: ' + error;
+        });
+    });
+
+    // Configuração dos gráficos
+    const chartColors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF'];
+    const formatCurrency = value => {
+        return new Intl.NumberFormat('pt-BR', {
+            style: 'currency',
+            currency: 'BRL'
+        }).format(value);
+    };
+
+    const commonOptions = {
+        responsive: true,
+        plugins: {
+            legend: {
+                position: 'bottom'
+            }
+        },
+        scales: {
+            y: {
+                beginAtZero: true,
+                ticks: {
+                    callback: value => formatCurrency(value)
+                }
+            }
+        }
+    };
+
+    const chartData = {
+        labels: {{ months|safe }},
+        datasets: [
+            {% for item in data %}
+            {
+                label: '{{ item.nome }}',
+                data: [{% for valor in item.valores %}{{ valor|cut:"R$ "|cut:"."|cut:","|safe }},{% endfor %}],
+                borderColor: chartColors[{{ forloop.counter0 }} % 5],
+                backgroundColor: chartColors[{{ forloop.counter0 }} % 5] + '80',
+                tension: 0.1
+            },
+            {% endfor %}
+        ]
+    };
+
+    // Gráfico de Linhas
+    const lineOptions = Object.assign({}, commonOptions, {
+        elements: {
+            line: {
+                fill: false
+            }
+        }
+    });
+    new Chart(document.getElementById('lineChart').getContext('2d'), {
+        type: 'line',
+        data: chartData,
+        options: lineOptions
+    });
+
+    // Gráfico de Barras
+    const barOptions = Object.assign({}, commonOptions, {
+        barPercentage: 0.8,
+        categoryPercentage: 0.9
+    });
+    new Chart(document.getElementById('barChart').getContext('2d'), {
+        type: 'bar',
+        data: chartData,
+        options: barOptions
+    });
+});
+</script>
+{% endblock %} 

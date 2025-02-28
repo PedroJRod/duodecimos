@@ -91,3 +91,31 @@ class MonthlyExpense(models.Model):
     def __str__(self):
         month_name = dict(MONTH_CHOICES)[self.month]
         return f"{self.power.name} - {self.category.name} - {month_name}/{self.year}: R$ {self.value:,.2f}"
+
+class Cronograma(models.Model):
+    ug = models.IntegerField()
+    nome_unidade = models.CharField(max_length=200)
+    ano = models.IntegerField(validators=[MinValueValidator(2000), MaxValueValidator(2100)])
+    fonte_recurso = models.CharField(max_length=100)
+    valor_despesa = models.DecimalField(max_digits=15, decimal_places=2)
+    janeiro = models.DecimalField(max_digits=15, decimal_places=2)
+    fevereiro = models.DecimalField(max_digits=15, decimal_places=2)
+    marco = models.DecimalField(max_digits=15, decimal_places=2)
+    abril = models.DecimalField(max_digits=15, decimal_places=2)
+    maio = models.DecimalField(max_digits=15, decimal_places=2)
+    junho = models.DecimalField(max_digits=15, decimal_places=2)
+    julho = models.DecimalField(max_digits=15, decimal_places=2)
+    agosto = models.DecimalField(max_digits=15, decimal_places=2)
+    setembro = models.DecimalField(max_digits=15, decimal_places=2)
+    outubro = models.DecimalField(max_digits=15, decimal_places=2)
+    novembro = models.DecimalField(max_digits=15, decimal_places=2)
+    dezembro = models.DecimalField(max_digits=15, decimal_places=2)
+    total = models.DecimalField(max_digits=15, decimal_places=2)
+
+    class Meta:
+        unique_together = ('ug', 'ano', 'fonte_recurso')
+        verbose_name = 'Cronograma de Desembolso'
+        verbose_name_plural = 'Cronogramas de Desembolso'
+
+    def __str__(self):
+        return f"UG {self.ug} - {self.nome_unidade} ({self.ano})"

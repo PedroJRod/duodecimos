@@ -8,4 +8,6 @@ urlpatterns = [
     path('expenses/', views.ExpenseDashboardView.as_view(), name='expense_dashboard'),
     path('upload-expenses/', views.upload_expenses, name='upload_expenses'),
     path('generate-expense-report/', views.generate_report, {'type': 'expense'}, name='generate_expense_report'),
+    path('cronograma/', views.CronogramaView.as_view(), name='cronograma'),
+    path('upload-cronograma/', views.upload_cronograma, name='upload_cronograma'),
 ] 
